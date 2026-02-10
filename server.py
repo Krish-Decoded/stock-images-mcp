@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +41,31 @@ def validate_api_key(platform: str, api_key: str) -> None:
     """Validate that API key exists for the platform"""
     if not api_key:
         raise StockImageError(f"API key for {platform} not found. Please set {platform.upper()}_API_KEY in your .env file")
+
+def check_url(url: str, timeout: int = 5) -> bool:
+    """Check if a URL is valid using HTTP HEAD request (no content download)"""
+    try:
+        resp = requests.head(url, timeout=timeout, allow_redirects=True)
+        # 200 = confirmed valid, 405/501 = server doesn't support HEAD so assume valid
+        return resp.status_code == 200 or resp.status_code in (405, 501)
+    except requests.RequestException:
+        return False
+
+def filter_valid_images(images: List[Dict[str, Any]], timeout: int = 5) -> List[Dict[str, Any]]:
+    """Filter images by validating their URLs concurrently using HEAD requests"""
+    if not images:
+        return images
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_img = {
+            executor.submit(check_url, img["url"], timeout): img
+            for img in images
+        }
+        valid = []
+        for future in as_completed(future_to_img):
+            if future.result():
+                valid.append(future_to_img[future])
+    return valid
 
 def search_pexels(query: str, per_page: int = 10) -> List[Dict[str, Any]]:
     """Search images on Pexels"""
@@ -150,6 +176,10 @@ async def search_stock_images(query: str, platform: str = "all", per_page: int =
         
         if not results:
             return "No API keys configured. Please set up your API keys in the .env file."
+        
+        # Filter out invalid URLs using HEAD requests
+        for platform_name in results:
+            results[platform_name] = filter_valid_images(results[platform_name])
         
         # Format results for display
         formatted_results = []
