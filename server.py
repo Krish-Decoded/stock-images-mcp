@@ -43,11 +43,23 @@ def validate_api_key(platform: str, api_key: str) -> None:
         raise StockImageError(f"API key for {platform} not found. Please set {platform.upper()}_API_KEY in your .env file")
 
 def check_url(url: str, timeout: int = 5) -> bool:
-    """Check if a URL is valid using HTTP HEAD request (no content download)"""
+    """Check if a URL points to a valid image by verifying Content-Type"""
     try:
-        resp = requests.head(url, timeout=timeout, allow_redirects=True)
-        # 200 = confirmed valid, 405/501 = server doesn't support HEAD so assume valid
-        return resp.status_code == 200 or resp.status_code in (405, 501)
+        headers = {"Accept": "image/*"}
+        resp = requests.head(url, timeout=timeout, allow_redirects=True, headers=headers)
+
+        if resp.status_code == 200:
+            content_type = resp.headers.get("Content-Type", "")
+            return content_type.startswith("image/")
+
+        if resp.status_code in (405, 501):
+            resp = requests.get(url, timeout=timeout, allow_redirects=True, headers=headers, stream=True)
+            resp.close()
+            if resp.status_code == 200:
+                content_type = resp.headers.get("Content-Type", "")
+                return content_type.startswith("image/")
+
+        return False
     except requests.RequestException:
         return False
 
