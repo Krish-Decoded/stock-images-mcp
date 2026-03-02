@@ -8,6 +8,8 @@ import os
 import requests
 import json
 import sys
+import logging
+from contextvars import ContextVar
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 from urllib.parse import quote
@@ -18,12 +20,40 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Load environment variables
 load_dotenv()
 
-print("--- Stock Images MCP Server Starting ---", file=sys.stderr)
-sys.stderr.flush()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
+
+logger.info("--- Stock Images MCP Server Starting ---")
+
+_client_ip_var: ContextVar[str] = ContextVar("client_ip", default="unknown")
 
 TRANSPORT = os.getenv("TRANSPORT", "stdio")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+
+class _IPCaptureMiddleware:
+    """Starlette middleware that stores the client IP in a ContextVar for each request."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            headers = dict(scope.get("headers", []))
+            forwarded_for = headers.get(b"x-forwarded-for", b"").decode()
+            if forwarded_for:
+                ip = forwarded_for.split(",")[0].strip()
+            else:
+                client = scope.get("client")
+                ip = client[0] if client else "unknown"
+            _client_ip_var.set(ip)
+        await self.app(scope, receive, send)
+
 
 mcp = FastMCP(
     "stock-images-mcp",
@@ -171,6 +201,11 @@ def search_pixabay(query: str, per_page: int = 10) -> List[Dict[str, Any]]:
     except requests.RequestException as e:
         raise StockImageError(f"Pixabay API error: {str(e)}")
 
+def _get_client_ip() -> str:
+    """Return the client IP captured by the middleware for the current request."""
+    return _client_ip_var.get()
+
+
 @mcp.tool()
 async def search_stock_images(query: str, platform: str = "all", per_page: int = 10) -> str:
     """
@@ -181,7 +216,8 @@ async def search_stock_images(query: str, platform: str = "all", per_page: int =
         platform: Platform to search on (all, pexels, unsplash, pixabay). Default: all
         per_page: Number of images to return per platform (1-50). Default: 10
     """
-    print(f"MCP Tool (Stock Images): search_stock_images called with query: {query}, platform: {platform}", file=sys.stderr)
+    client_ip = _get_client_ip()
+    logger.info("search_stock_images | query=%r platform=%s per_page=%d ip=%s", query, platform, per_page, client_ip)
     
     try:
         results = {}
@@ -207,6 +243,7 @@ async def search_stock_images(query: str, platform: str = "all", per_page: int =
         for platform_name, images in results.items():
             formatted_results.append(f"\n## {platform_name.title()} Results ({len(images)} images):")
             for i, img in enumerate(images, 1):
+                logger.info("image_served | ip=%s query=%r platform=%s name=%r url=%s", client_ip, query, platform_name, img.get("alt") or img.get("photographer", ""), img["url"])
                 formatted_results.append(
                     f"{i}. **{img['photographer']}** - {img['width']}x{img['height']}\n"
                     f"   Preview: {img['preview_url']}\n"
@@ -221,8 +258,7 @@ async def search_stock_images(query: str, platform: str = "all", per_page: int =
 
 def main():
     """Main function to run the MCP server"""
-    print(f"Starting server with transport: {TRANSPORT}", file=sys.stderr)
-    sys.stderr.flush()
+    logger.info("Starting server with transport: %s", TRANSPORT)
     mcp.run(transport=TRANSPORT)
 
 if __name__ == "__main__":

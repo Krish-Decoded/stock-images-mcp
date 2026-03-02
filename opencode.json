@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "stock-images": {
+      "type": "remote",
+      "url": "https://stock-images-mcp.onrender.com/mcp",
+      "enabled": true
+    }
+  }
+}
