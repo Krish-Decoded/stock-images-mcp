@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: stock-images-mcp
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: TRANSPORT
+        value: streamable-http
+      - key: PEXELS_API_KEY
+        sync: false
+      - key: UNSPLASH_API_KEY
+        sync: false
+      - key: PIXABAY_API_KEY
+        sync: false

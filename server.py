@@ -21,8 +21,17 @@ load_dotenv()
 print("--- Stock Images MCP Server Starting ---", file=sys.stderr)
 sys.stderr.flush()
 
-# Initialize the FastMCP server
-mcp = FastMCP("stock-images-mcp")
+TRANSPORT = os.getenv("TRANSPORT", "stdio")
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8000"))
+
+mcp = FastMCP(
+    "stock-images-mcp",
+    host=HOST,
+    port=PORT,
+    stateless_http=True,
+    json_response=True,
+)
 
 # API Keys from environment variables
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
@@ -212,14 +221,9 @@ async def search_stock_images(query: str, platform: str = "all", per_page: int =
 
 def main():
     """Main function to run the MCP server"""
-    mcp.run(transport='stdio')
-    print("--- mcp.run() finished (should not happen if running as server) ---", file=sys.stderr)
+    print(f"Starting server with transport: {TRANSPORT}", file=sys.stderr)
     sys.stderr.flush()
+    mcp.run(transport=TRANSPORT)
 
 if __name__ == "__main__":
-    print("--- Entering main block, calling mcp.run() ---", file=sys.stderr)
-    sys.stderr.flush()
     main()
-
-print("--- Script reached end (should not happen if running as server) ---", file=sys.stderr)
-sys.stderr.flush()
